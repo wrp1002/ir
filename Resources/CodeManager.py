@@ -4,6 +4,7 @@ import cPickle as pickle
 import re
 import time
 import RPi.GPIO as GPIO
+import random
 
 class CodeManager():
 	def __init__(self):
@@ -14,45 +15,110 @@ class CodeManager():
 			self.codes = self.LoadCodes()
 			self.ir = pyslingerTEST.IR(3, "NEC")
 			self.buttonNames = {"button0":"KEY_POWER", "1":"KEY_VOLUMEUP", "4":"KEY_VOLUMEDOWN", "2":"KEY_CHANNELUP", "5":"KEY_CHANNELDOWN", "A":"KEY_MUTE"}
+			self.importantCodes = [["KEY_POWER"], ["KEY_VOLUMEUP", "VOL_UP", "KEY_VIDEO"], ["KEY_VOLUMEDOWN", "VOL_DWN", "MEMORY"], ["KEY_CHANNELUP", "CH_UP", "DIGITALZOOM+", "KEY_ZOOMIN", "ASPECT"], ["KEY_CHANNELDOWN", "CH_DWN", "CHDN", "DIGITALZOOM-", "KEY_ZOOMOUT", "COLOR-MODE"], ["KEY_MUTE", "KEY_ZOOMIN", "INPUT-A-B", "KEY_ESC"]]
+			self.allMode = False
 
 		except IOError:
 			print "Brands file not found"
+
+	def GetImportantCode(self, cmd):
+		for iCode in self.importantCodes:
+			for innerICode in iCode:
+				if cmd == innerICode:
+					return iCode[0]
+
+		return ""
+
+	def DeleteBrand(self, brand):
+		if brand in self.brands:
+			self.brands.remove(brand)
+			self.codes = self.LoadCodes()
+			
+			for i in range(len(self.codes) - 1, -1, -1):
+				if self.codes[i][0]["brand"] == brand:
+					del self.codes[i]
+
+			self.SaveCodes()
+			self.SaveBrands()
+
+			print "Deleted", brand
+		else:
+			print "Brand not found"
+
+	def input(self, low, high):
+		val = low - 1
+		while val < low or val > high:
+			try:
+				val = int(raw_input(">"))
+				if val < low or val > high: raise ValueError()
+
+			except ValueError:
+				print "Must enter number between ", low, "and", high
+		return val
+		
 
 	def LoadBrands(self):
 		return pickle.load(open("Resources/brands", "rb"))
 
 	def SaveBrands(self):
+		print "saving brands..."
 		pickle.dump(self.brands, open("Resources/brands", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
 
 	def LoadCodes(self):
 		return pickle.load(open("Resources/save", "rb"))
 
 	def SaveCodes(self):
-		print "saving..."
+		print "saving codes..."
 		pickle.dump(self.codes, open("Resources/save", "wb"), protocol=pickle.HIGHEST_PROTOCOL)
 
-	def SendCode(self, index, cmd):
+	#distribute codes so that codes with the same brand are as far apart as possible to avoid conflicts
+	def DistributeCodes(self):
+		temp = self.codes[:]
+		brandsList = self.brands
+
+		while len(temp) > 0:
+			pass
+
+
+	def SendCode(self, cmd, index):
+		amount = len(self.codes)
+		if not self.allMode:
+			amount = 5
+		else:
+			index = 0
+
+		print index
+
 		try:
 			if cmd == "D":
 				raise KeyboardInterrupt()
-			#for i in range(index, index + 10):
-			for i in range(len(self.codes)):
-				if i >= len(self.codes) - 1:
-					return 
+			elif cmd == "*":
+				self.allMode = not self.allMode
+				return False
+			elif cmd == "B" or cmd == "C":
+				pass
+			else:
+				for i in range(index, index + amount):
+				#for i in range(len(self.codes)):
 
-				code = self.codes[i]
+					if i >= len(self.codes):
+						break
+					
+					code = self.codes[i]
 
-				if cmd in self.buttonNames:
-					codeName = self.buttonNames[cmd]
-					if codeName in code[1]:
-						for innerCode in code[1][codeName]:
-							print innerCode
-							#self.ir.send_code(innerCode, code[2])
-							self.ir.send_processed_code(innerCode)
+					if cmd in self.buttonNames:
+						codeName = self.buttonNames[cmd]
+						if codeName in code[1]:
+							for innerIndex in range(len(code[1][codeName])):
+								innerCode = code[1][codeName][innerIndex]
+								print "index: ", i, "innerindex: ", innerIndex
+								
+								self.ir.send_processed_code(innerCode)
+						else:
+							print "Command not found"
 					else:
-						print "Command not found"
-				else:
-					print "Button not found"
+						print "Button not found"
+			return True
 
 		except KeyboardInterrupt:
 			print "Cleaning up"
@@ -76,34 +142,67 @@ class CodeManager():
 					self.codes[i][1][code][j] = temp
 					#print innerCode
 					#pass
-					
+		random.shuffle(self.codes)
 
 
-	def Download(self):
+	def Download(self, mode):
+		autosave = False
+		print "\nAutosave?\n1. Yes\n2. No"
+		if self.input(1, 2) == 1:
+			autosave = True
+
 		importantInfo = ["header", "one", "zero", "name", "bits", "ptrail", "pre_data_bits", "pre_data", "gap", "duty_cycle"]
-		importantCodes = ["KEY_POWER", "KEY_VOLUMEUP", "KEY_VOLUMEDOWN", "KEY_CHANNELUP", "KEY_CHANNELDOWN", "KEY_MUTE"]
 
-		self.codes = []
+		if mode == 0:
+			self.codes = []
+			self.brands = []
+		elif mode == 1:
+			pass
+		elif mode == 2:
+			self.codes = []
+
 		startLen = len(self.codes)
-		input = raw_input("Enter brands separated by commas: ")
+		if mode == 0 or mode == 1:
+			input = raw_input("Enter brands separated by commas: ")
 		urls = []
 
-		tempBrands = input.split(",")
+		tempBrands = self.brands
+		if mode == 0 or mode == 1:
+			tempBrands = input.split(",")
 
 
-		for brand in tempBrands:
+		print "Codes: ", len(self.codes)
+		print "brands: ", len(self.brands)
+
+		for brand in tempBrands[:]:
 			baseURL = "http://lirc.sourceforge.net/remotes/" + brand + "/"
 
-			response = urllib2.urlopen(baseURL)
-			html = response.read()
-			urlsTemp = html[html.find("Parent Directory"):].rsplit("</tr>")[1:-2]
+			try:
+				download = True
+				if brand in self.brands:
+					print "\n", brand, "already downloaded. Redownload?\n1. Yes\n2. No"
+					if self.input(1, 2) == 1:
+						self.DeleteBrand(brand)
+					else:
+						download = False
+				if download:
+					response = urllib2.urlopen(baseURL)
+					html = response.read()
+					urlsTemp = html[html.find("Parent Directory"):].rsplit("</tr>")[1:-2]
 
-			for i in range(len(urlsTemp)):
-					urlsTemp[i] = urlsTemp[i][urlsTemp[i].find("href="):urlsTemp[i].find("</a>")]
-					urlsTemp[i] = urlsTemp[i][urlsTemp[i].find("\">")+2:]
-					urlsTemp[i] = baseURL + urlsTemp[i]
+					for i in range(len(urlsTemp)):
+							urlsTemp[i] = urlsTemp[i][urlsTemp[i].find("href="):urlsTemp[i].find("</a>")]
+							urlsTemp[i] = urlsTemp[i][urlsTemp[i].find("\">")+2:]
+							urlsTemp[i] = baseURL + urlsTemp[i]
 
-			urls += urlsTemp
+					urls += urlsTemp
+			except urllib2.HTTPError:
+				tempBrands.remove(brand)
+				print "Error: ", baseURL, "not found"
+				print "Continue?\n1. Yes\n2. No"
+				if self.input(1, 2) == 2:
+					quit()
+
 
 		print "URLs found:"
 		for i in urls:
@@ -112,7 +211,12 @@ class CodeManager():
 
 		print "Gathering codes..."
 
+		times = []
+		avgTime = 0
+		amountMeasured = 0
+
 		for url in urls:
+			startTime = time.time()
 			newInfo = {}
 			newCodes = {}
 			newDict = {
@@ -134,8 +238,6 @@ class CodeManager():
 			brand = tempURL[tempURL.rfind("/") + 1:]
 			newInfo["brand"] = brand
 
-			print int(float(urls.index(url)) / len(urls) * 100), "%"
-
 			if "jpg" in url or "jpeg" in url or "gif" in url:
 				print "Skipping ", url
 				continue
@@ -146,7 +248,7 @@ class CodeManager():
 			html = response.read()
 
 			print "Reading..."
- #\t to match a tab character (ASCII 0x09), \r for carriage return (0x0D) and \n for line feed (0x0A). More exotic non-printables are \a (bell, 0x07), \e (escape, 0x1B), and \f (form feed, 0x0C). Remember that Windows text files use \r\n
+ 
 			for i in html:
 				if i != "\n":
 					line += i
@@ -155,26 +257,32 @@ class CodeManager():
 						lines.append(" ".join(line.split()).split("#", 1)[0])
 					line = ""
 
+			foundCodes = []
 			for i in lines:
 				split = i.find(' ')
 				name = i[:split]
-				val = i[split + 1:]
+				val = i[split + 1:].strip(" ")
 
 				#print name, val
 
 				if i != "begin remote" and i != "begin codes" and i != "end codes" and i != "end codes":
 					if startCodes:
-						if name in importantCodes:
-							newCodes[name] = val
+						name = name.upper()
+						foundCodes.append(name)
+
+						tmp = self.GetImportantCode(name)
+						if tmp and " " not in val:
+							newCodes[tmp] = val
+						elif " " in val:
+							print "Error: Space found in code", name, val
 
 					elif name in importantInfo:
 						newInfo[name] = val
 				elif i == "begin codes":
 					startCodes = True
 
-
 			if "header" in newInfo:
-				print newInfo["header"]
+				#print newInfo["header"]
 				newDict["leading_pulse_duration"] = int(newInfo["header"].split(" ")[0])
 				newDict["leading_gap_duration"] = int(newInfo["header"].split(" ")[1])
 
@@ -193,7 +301,9 @@ class CodeManager():
 
 			newCode = [newInfo, newCodes, newDict]
 
-			print newCode[0]
+			print newCode
+
+			#print newCode[0]
 
 			for cmd in newCode[1]:
 				converted = ""
@@ -206,15 +316,27 @@ class CodeManager():
 			#print newCode
 
 			isTV = False
-			if all(name in newCodes for name in importantCodes):
+			found = []
+			for i in newCodes:
+				temp = self.GetImportantCode(i)
+				if temp:
+					found.append(temp)
+
+			if len(found) == len(self.importantCodes):
 				isTV = True
 				print "----------TV----------------------------------"
 			else:
+				print "Names found", foundCodes
 				if "name" in newInfo:
 					print newInfo["name"]
-				for name in importantCodes:
-					if not name in newCodes:
-						print name, " not found"
+				for iCode in self.importantCodes:
+					found = False
+					for innerCode in iCode:
+						if innerCode in newCodes:
+							found = True
+							break
+					if not found:
+						print iCode, " not found"
 			#isTV = True
 
 			duplicate = False
@@ -223,19 +345,19 @@ class CodeManager():
 					otherCode = self.codes[i]
 					sameDict = True
 
-					if set(newCode[2].keys()) == set(otherCode[2].keys()):
+					if set(newCode[2].keys()) == set(otherCode[2].keys()) and newCode[0]["brand"] == otherCode[0]["brand"]:
 						for info in newCode[2]:
 							if info == "frequency" or info == "duty_cycle" or info == "trailing_pulse":
 								if newCode[2][info] != otherCode[2][info]:
 									print "different dict because ", info, newCode[2][info], " != ", otherCode[2][info]
 									sameDict = False
 									break
-							elif abs(newCode[2][info] - otherCode[2][info]) > 150:
-								print "different dict because ", info, abs(newCode[2][info] - otherCode[2][info]), " > 150"
+							elif abs(newCode[2][info] - otherCode[2][info]) > 300:
+								print "different dict because ", info, abs(newCode[2][info] - otherCode[2][info]), " > 300"
 								sameDict = False
 								break
 					else:
-						print "Different dict because different dict keys"
+						print "Different dict because different dict keys or different brand"
 						sameDict = False
 
 					if sameDict:
@@ -258,13 +380,14 @@ class CodeManager():
 												self.codes[i][0]["name"] = newCode[0]["name"]
 										break
 							
-							if sameCodes:
+						if sameCodes:
+							for cmd in otherCode[1]:
 								for c in range(len(otherCode[1][cmd])):
 									if newCode[1][cmd][0] not in otherCode[1][cmd]:
 										print "Differnet Code Added: ", cmd
 										self.codes[i][1][cmd].append(newCode[1][cmd][0])
-							else:
-								print "No codes in common"
+						else:
+							print "No codes in common"
 								
 			else:
 				duplicate = False
@@ -280,17 +403,29 @@ class CodeManager():
 				elif duplicate:
 					print "Duplicate"
 
+			times.append(time.time() - startTime)
+			avgTime = sum(times) / len(times)
+			timeLeft = avgTime * (len(urls) - len(times))
+			minutes = int(timeLeft / 60)
+			seconds = int(timeLeft % 60)
+
+			print int(float(urls.index(url)) / len(urls) * 100), "%", timeLeft, " seconds left ", minutes, "m", seconds, "s"
+
+
 		print "\nSave", len(self.codes) - startLen, " new codes?"
 		print "1. Yes"
 		print "2. No"
-		input = raw_input("Enter Option: ")
+		input = 1 
+		if not autosave:
+			self.input(1, 2)
 
-		if input == "1":
+		if input == 1:
 			self.SaveCodes()
-			self.brands = tempBrands
+			for b in tempBrands:
+				self.brands.append(b)
 			self.SaveBrands()
 
-		self.ConvertCodes()
+		#self.ConvertCodes()
 
 
 
