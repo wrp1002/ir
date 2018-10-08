@@ -87,7 +87,7 @@ class CodeManager():
 		else:
 			index = 0
 
-		print index
+		#print index
 
 		try:
 			if cmd == "D":
@@ -111,7 +111,7 @@ class CodeManager():
 						if codeName in code[1]:
 							for innerIndex in range(len(code[1][codeName])):
 								innerCode = code[1][codeName][innerIndex]
-								print "index: ", i, "innerindex: ", innerIndex
+								#print "index: ", i, "innerindex: ", innerIndex
 								
 								self.ir.send_processed_code(innerCode)
 						else:

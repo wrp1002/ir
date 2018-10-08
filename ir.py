@@ -20,14 +20,14 @@ keypad = keypad.Keypad([37, 35, 33, 31], [40, 38, 36, 32], [["1","2","3","A"],["
 
 codeManager = CodeManager()
 
-#Flash(3)
-
 def Flash(amount):
 	for i in range(amount):
 		GPIO.output(GPIO_LED, GPIO.HIGH)
 		time.sleep(.2)
 		GPIO.output(GPIO_LED, GPIO.LOW)
 		time.sleep(.2)
+
+Flash(3)
 
 def Menu():
 	print "\nCurrent Brands: ", codeManager.brands
@@ -89,11 +89,7 @@ Menu()
 
 print len(codeManager.codes), "codes"
 
-#for i in range(0,5):
-#	GPIO.output(GPIO_LED, GPIO.HIGH)
-#	time.sleep(.2)
-#	GPIO.output(GPIO_LED, GPIO.LOW)
-#	time.sleep(.2)
+Flash(5)
 
 try:
 	index = 0
@@ -122,7 +118,7 @@ try:
 				if index < 0:
 					index += len(codeManager.codes)
 				Flash(1)
-				
+
 			elif key == "B":
 				index += 5
 				if index >= len(codeManager.codes):
@@ -152,7 +148,7 @@ try:
 
 					index %= len(codeManager.codes)
 
-					print "index:", index
+					#print "index:", index
 
 					codeManager.SendCode(key, index)
 
